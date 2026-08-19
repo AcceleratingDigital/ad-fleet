@@ -114,6 +114,26 @@ case "$TASK_TYPE" in
     fi
     ;;
 
+  "fleet_alert")
+    # A watchdog on another machine is alerting us — forward via Telegram if we have it
+    ALERT_MSG=$(echo "$TASK_BODY" | python3 -c "
+import sys, json
+try:
+    d = json.loads(sys.stdin.read())
+    host = d.get('host', 'unknown')
+    msg = d.get('message', 'No details')
+    print(f'🚨 AD-Fleet Alert\nMachine: {host}\n{msg}')
+except:
+    print(sys.stdin.read())
+" 2>/dev/null)
+    # Send via main Hermes telegram if configured
+    HERMES_BIN=$(command -v hermes 2>/dev/null || echo "$HOME/.hermes/hermes-agent/venv/bin/hermes")
+    if [ -x "$HERMES_BIN" ]; then
+      HERMES_HOME="$HOME/.hermes" "$HERMES_BIN" send "$ALERT_MSG" -t telegram 2>/dev/null || true
+    fi
+    RESULT="Alert forwarded: $ALERT_MSG"
+    ;;
+
   "hermes_prompt")
     # Send prompt to fleet Hermes API server on port 8001
     FLEET_API_KEY=$(grep "API_SERVER_KEY=" "$HOME/.ad-fleet/hermes/.env" 2>/dev/null | cut -d'=' -f2)

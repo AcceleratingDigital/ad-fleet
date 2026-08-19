@@ -75,6 +75,52 @@ if [ "$ROLE" = "admin" ] && [ -d "$REPO_DIR/skills" ]; then
   fi
 fi
 
+# --- Install/update watchdog crons ---
+# Cron A: fleet Hermes (8001) watches main Hermes (8000) — runs in fleet Hermes cron
+WATCH_MAIN="$FLEET_DIR/scripts/ad-fleet-watch-main-hermes.sh"
+if [ -f "$WATCH_MAIN" ]; then
+  chmod +x "$WATCH_MAIN"
+  FLEET_HERMES_BIN="$FLEET_DIR/hermes/hermes-agent/venv/bin/hermes"
+  if [ -x "$FLEET_HERMES_BIN" ]; then
+    # Check if watchdog cron already exists in fleet Hermes
+    EXISTING=$(HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
+    if [ "$EXISTING" = "0" ]; then
+      log "Installing Cron A: fleet Hermes watches main Hermes (every 10 min)..."
+      mkdir -p "$FLEET_DIR/hermes/scripts"
+      cp "$WATCH_MAIN" "$FLEET_DIR/hermes/scripts/"
+      HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
+        --name "Watch Main Hermes" \
+        --script "ad-fleet-watch-main-hermes.sh" \
+        --no-agent \
+        --deliver local 2>/dev/null && log "  Cron A installed" || log "  Cron A install failed"
+    else
+      log "Cron A already installed (Watch Main Hermes)"
+    fi
+  fi
+fi
+
+# Cron B: main Hermes (8000) watches fleet Hermes (8001) — runs in user's main Hermes cron
+WATCH_FLEET="$FLEET_DIR/scripts/ad-fleet-watch-fleet-hermes.sh"
+if [ -f "$WATCH_FLEET" ]; then
+  chmod +x "$WATCH_FLEET"
+  MAIN_HERMES_BIN=$(command -v hermes 2>/dev/null || echo "$HOME/.hermes/hermes-agent/venv/bin/hermes")
+  if [ -x "$MAIN_HERMES_BIN" ]; then
+    EXISTING=$(HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Fleet Hermes" || true)
+    if [ "$EXISTING" = "0" ]; then
+      log "Installing Cron B: main Hermes watches fleet Hermes (every 10 min)..."
+      mkdir -p "$HOME/.hermes/scripts"
+      cp "$WATCH_FLEET" "$HOME/.hermes/scripts/"
+      HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron create "every 10m" \
+        --name "Watch Fleet Hermes" \
+        --script "ad-fleet-watch-fleet-hermes.sh" \
+        --no-agent \
+        --deliver local 2>/dev/null && log "  Cron B installed" || log "  Cron B install failed"
+    else
+      log "Cron B already installed (Watch Fleet Hermes)"
+    fi
+  fi
+fi
+
 # --- Run doctor to verify ---
 log "Running doctor..."
 bash "$FLEET_DIR/scripts/ad-fleet-doctor.sh" 2>&1 | grep -E "OK|WARN|FAIL|NOT" || true
