@@ -105,6 +105,15 @@ case "$TASK_TYPE" in
     RESULT="Join approved — local role updated to $CONFIG_ROLE"
     ;;
 
+  "fleet_update")
+    # Pull latest scripts from GitHub and reload daemons
+    if [ -f "$HOME/.ad-fleet/scripts/ad-fleet-update.sh" ]; then
+      RESULT=$(bash "$HOME/.ad-fleet/scripts/ad-fleet-update.sh" 2>&1)
+    else
+      RESULT="ad-fleet-update.sh not found — cannot update"
+    fi
+    ;;
+
   "hermes_prompt")
     # Send prompt to fleet Hermes API server on port 8001
     FLEET_API_KEY=$(grep "API_SERVER_KEY=" "$HOME/.ad-fleet/hermes/.env" 2>/dev/null | cut -d'=' -f2)
