@@ -1,0 +1,6 @@
+.DS_Store
+*.zip
+*.log
+__pycache__/
+.env
+secrets.conf
