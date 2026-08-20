@@ -9,7 +9,7 @@
 
 set -euo pipefail
 
-FLEET_DIR="$HOME/.ad-fleet"
+FLEET_DIR="${FLEET_DIR:-$HOME/.ad-fleet}"
 STATE_FILE="$FLEET_DIR/install_state.json"
 LOG="$FLEET_DIR/logs/install.log"
 mkdir -p "$FLEET_DIR/logs" 2>/dev/null || true
@@ -139,11 +139,14 @@ done
 ok "Watchdog scripts installed"
 
 # Install watchdog crons (if Hermes is available)
-FLEET_HERMES_BIN="$HOME/.ad-fleet/hermes/hermes-agent/venv/bin/hermes"
+# Only install if INSTALL_WATCHDOGS is true (set by installer, not by fleet_update)
+FLEET_HERMES_BIN="$FLEET_DIR/hermes/hermes-agent/venv/bin/hermes"
 if [ -x "$FLEET_HERMES_BIN" ]; then
-  EXISTING_A=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
+  EXISTING_A=$(HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
   if [ "$EXISTING_A" = "0" ]; then
-    HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
+    mkdir -p "$FLEET_DIR/hermes/scripts"
+    cp "$FLEET_DIR/scripts/ad-fleet-watch-main-hermes.sh" "$FLEET_DIR/hermes/scripts/" 2>/dev/null || true
+    HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
       --name "Watch Main Hermes" --script "ad-fleet-watch-main-hermes.sh" \
       --no-agent --deliver local 2>/dev/null && ok "Cron A installed (fleet watches main)" || true
   fi
@@ -152,6 +155,8 @@ MAIN_HERMES_BIN=$(command -v hermes 2>/dev/null || echo "$HOME/.hermes/hermes-ag
 if [ -x "$MAIN_HERMES_BIN" ]; then
   EXISTING_B=$(HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Fleet Hermes" || true)
   if [ "$EXISTING_B" = "0" ]; then
+    mkdir -p "$HOME/.hermes/scripts"
+    cp "$FLEET_DIR/scripts/ad-fleet-watch-fleet-hermes.sh" "$HOME/.hermes/scripts/" 2>/dev/null || true
     HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron create "every 10m" \
       --name "Watch Fleet Hermes" --script "ad-fleet-watch-fleet-hermes.sh" \
       --no-agent --deliver local 2>/dev/null && ok "Cron B installed (main watches fleet)" || true

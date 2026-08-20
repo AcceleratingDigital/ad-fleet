@@ -8,7 +8,7 @@
 
 set -euo pipefail
 
-FLEET_DIR="$HOME/.ad-fleet"
+FLEET_DIR="${FLEET_DIR:-$HOME/.ad-fleet}"
 STATE_FILE="$FLEET_DIR/install_state.json"
 LOG="$FLEET_DIR/logs/install.log"
 mkdir -p "$FLEET_DIR/logs" 2>/dev/null || true
@@ -126,24 +126,24 @@ fi
 
 # Install watchdog scripts and crons
 log "Installing watchdog scripts..."
-mkdir -p "$FLEET_DIR/scripts" "$HOME/.ad-fleet/hermes/scripts" "$HOME/.hermes/scripts"
+mkdir -p "$FLEET_DIR/scripts" "$FLEET_DIR/hermes/scripts" "$HOME/.hermes/scripts"
 for ws in ad-fleet-watch-main-hermes.sh ad-fleet-watch-fleet-hermes.sh; do
   if [ -f "$SCRIPT_DIR/scripts/$ws" ]; then
     cp "$SCRIPT_DIR/scripts/$ws" "$FLEET_DIR/scripts/"
-    cp "$SCRIPT_DIR/scripts/$ws" "$HOME/.ad-fleet/hermes/scripts/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/scripts/$ws" "$FLEET_DIR/hermes/scripts/" 2>/dev/null || true
     cp "$SCRIPT_DIR/scripts/$ws" "$HOME/.hermes/scripts/" 2>/dev/null || true
-    chmod +x "$FLEET_DIR/scripts/$ws" "$HOME/.ad-fleet/hermes/scripts/$ws" "$HOME/.hermes/scripts/$ws" 2>/dev/null || true
+    chmod +x "$FLEET_DIR/scripts/$ws" "$FLEET_DIR/hermes/scripts/$ws" "$HOME/.hermes/scripts/$ws" 2>/dev/null || true
   fi
 done
 ok "Watchdog scripts installed"
 
 # Install watchdog crons (if Hermes is available)
-FLEET_HERMES_BIN="$HOME/.ad-fleet/hermes/hermes-agent/venv/bin/hermes"
+FLEET_HERMES_BIN="$FLEET_DIR/hermes/hermes-agent/venv/bin/hermes"
 if [ -x "$FLEET_HERMES_BIN" ]; then
   # Cron A: fleet Hermes watches main Hermes
-  EXISTING_A=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
+  EXISTING_A=$(HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
   if [ "$EXISTING_A" = "0" ]; then
-    HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
+    HERMES_HOME="$FLEET_DIR/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
       --name "Watch Main Hermes" --script "ad-fleet-watch-main-hermes.sh" \
       --no-agent --deliver local 2>/dev/null && ok "Cron A installed (fleet watches main)" || true
   fi

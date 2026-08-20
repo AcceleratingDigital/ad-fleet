@@ -2,7 +2,8 @@
 # ad-fleet-doctor.sh — Deterministic health diagnostics (no LLM required)
 # Part of: AcceleratingDigital Fleet (ad-fleet)
 
-CONFIG="$HOME/.ad-fleet/config.yaml"
+CONFIG="${FLEET_DIR:-$HOME/.ad-fleet}/config.yaml"
+FLEET_DIR="${FLEET_DIR:-$HOME/.ad-fleet}"
 
 # Find psql — not always in PATH on machines without Postgres app
 PSQL=""
@@ -16,15 +17,15 @@ MACHINE_NAME=$(grep "hostname:" "$CONFIG" | awk '{print $2}' | tr -d '"')
 echo "Hostname: $MACHINE_NAME"
 echo "OS:       $(uname -rs)"
 echo "Arch:     $(uname -m)"
-echo "UUID:     $(cat $HOME/.ad-fleet/machine_id 2>/dev/null || echo 'NOT SET')"
+echo "UUID:     $(cat $FLEET_DIR/machine_id 2>/dev/null || echo 'NOT SET')"
 echo ""
 
 # --- Fleet Hermes Gateway (port 8001) ---
 echo "--- Fleet Hermes (port 8001) ---"
-HERMES_BIN="$HOME/.ad-fleet/hermes/hermes-agent/venv/bin/hermes"
+HERMES_BIN="$FLEET_DIR/hermes/hermes-agent/venv/bin/hermes"
 echo -n "Binary:   "
 if [ -f "$HERMES_BIN" ]; then
-  VERSION=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$HERMES_BIN" --version 2>/dev/null | head -1 || echo "found")
+  VERSION=$(HERMES_HOME="$FLEET_DIR/hermes" "$HERMES_BIN" --version 2>/dev/null | head -1 || echo "found")
   echo "OK $VERSION"
 else
   echo "NOT FOUND"
@@ -38,7 +39,8 @@ else
 fi
 
 echo -n "Port 8001: "
-HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8001/v1/models 2>/dev/null || echo "000")
+HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8001/v1/models 2>/dev/null)
+[ -z "$HTTP_CODE" ] && HTTP_CODE="000"
 if echo "$HTTP_CODE" | grep -q "200\|401"; then
   echo "OK Responding (HTTP $HTTP_CODE)"
 else
@@ -67,7 +69,7 @@ echo "--- Fleet Config ---"
 echo -n "Config:   "
 [ -f "$CONFIG" ] && echo "OK $CONFIG" || echo "MISSING"
 echo -n "Machine ID: "
-[ -f "$HOME/.ad-fleet/machine_id" ] && echo "OK $(cat $HOME/.ad-fleet/machine_id)" || echo "MISSING"
+[ -f "$FLEET_DIR/machine_id" ] && echo "OK $(cat $FLEET_DIR/machine_id)" || echo "MISSING"
 echo -n "Role:     "
 grep "role:" "$CONFIG" 2>/dev/null | awk '{print $2}' | tr -d '"' || echo "UNKNOWN"
 
@@ -81,7 +83,7 @@ launchctl list 2>/dev/null | grep -q "com.ad-fleet.poller" && echo "OK Loaded" |
 echo -n "Fleet Hermes: "
 launchctl list 2>/dev/null | grep -q "com.ad-fleet.hermes-gateway" && echo "OK Loaded" || echo "NOT LOADED"
 echo -n "Last HB:   "
-tail -1 "$HOME/.ad-fleet/logs/heartbeat.log" 2>/dev/null || echo "No heartbeat log yet"
+tail -1 "$FLEET_DIR/logs/heartbeat.log" 2>/dev/null || echo "No heartbeat log yet"
 
 # --- Database ---
 echo ""
