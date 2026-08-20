@@ -43,15 +43,30 @@ send_alert() {
 }
 
 check_main_hermes() {
+  # First try port 8000 (API server, if configured)
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 5 \
     http://127.0.0.1:8000/v1/models 2>/dev/null || echo "000")
+  if echo "$code" | grep -qE "^(200|401)$"; then
+    echo "$code"
+    return
+  fi
+  # Fall back: check if the gateway process is running (Telegram-only installs have no HTTP port)
+  if pgrep -f "hermes_cli.main gateway" | grep -v "ad-fleet" > /dev/null 2>&1; then
+    echo "process_ok"
+    return
+  fi
+  # Also check the LaunchAgent exit status — if it's loaded and PID exists, it's running
+  if launchctl list ai.hermes.gateway 2>/dev/null | grep -q '"PID"'; then
+    echo "process_ok"
+    return
+  fi
   echo "$code"
 }
 
 # --- Check health ---
 STATUS=$(check_main_hermes)
-if echo "$STATUS" | grep -qE "^(200|401)$"; then
+if echo "$STATUS" | grep -qE "^(200|401|process_ok)$"; then
   # Healthy — silent exit
   tail -"$MAX_LOG_LINES" "$LOG" > "$LOG.tmp" 2>/dev/null && mv "$LOG.tmp" "$LOG" 2>/dev/null || true
   exit 0
@@ -67,7 +82,7 @@ if [ -f "$MAIN_HERMES_PLIST" ]; then
   launchctl load "$MAIN_HERMES_PLIST" 2>/dev/null || true
   sleep 30
   STATUS=$(check_main_hermes)
-  if echo "$STATUS" | grep -qE "^(200|401)$"; then
+  if echo "$STATUS" | grep -qE "^(200|401|process_ok)$"; then
     log "Step 1 SUCCESS: Main Hermes recovered after restart."
     send_alert "Main Hermes on $HOSTNAME was down — recovered via restart. No action needed."
     exit 0
@@ -94,7 +109,7 @@ if [ -f "$BACKUP" ]; then
     sleep 30
   fi
   STATUS=$(check_main_hermes)
-  if echo "$STATUS" | grep -qE "^(200|401)$"; then
+  if echo "$STATUS" | grep -qE "^(200|401|process_ok)$"; then
     log "Step 2 SUCCESS: Main Hermes recovered after config rollback."
     send_alert "Main Hermes on $HOSTNAME was down — recovered via config rollback. Please review config."
     exit 0
