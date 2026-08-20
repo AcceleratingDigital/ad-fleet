@@ -137,6 +137,48 @@ for ws in ad-fleet-watch-main-hermes.sh ad-fleet-watch-fleet-hermes.sh; do
 done
 ok "Watchdog scripts installed"
 
+# --- Remediate damage from old (buggy) watchdog ---
+# The pre-v4.1 watchdog probed :8000, judged healthy gateways dead, restart-bombed
+# them every 10m, and could stomp ~/.hermes/config.yaml with a stale backup.
+log "Checking for old-watchdog damage..."
+# 1. Clear stale cooldown markers so the fixed watchdog starts clean
+rm -f "$FLEET_DIR/logs/.watchdog-main-cooldown" 2>/dev/null || true
+# 2. Verify all three watchdog copies are byte-identical (executed copy = bundled copy)
+WMAIN_REF=$(md5 -q "$SCRIPT_DIR/scripts/ad-fleet-watch-main-hermes.sh" 2>/dev/null || md5sum "$SCRIPT_DIR/scripts/ad-fleet-watch-main-hermes.sh" 2>/dev/null | awk '{print $1}')
+for copy in "$FLEET_DIR/scripts" "$FLEET_DIR/hermes/scripts" "$HOME/.hermes/scripts"; do
+  f="$copy/ad-fleet-watch-main-hermes.sh"
+  if [ -f "$f" ]; then
+    WMAIN_CUR=$(md5 -q "$f" 2>/dev/null || md5sum "$f" 2>/dev/null | awk '{print $1}')
+    if [ "$WMAIN_CUR" != "$WMAIN_REF" ]; then
+      cp "$SCRIPT_DIR/scripts/ad-fleet-watch-main-hermes.sh" "$f" && chmod +x "$f"
+      ok "Re-synced stale watchdog copy: $f"
+    fi
+  fi
+done
+# 3. Warn if the old watchdog ever stomped the main config (evidence: bak-watchdog files)
+STOMPED=$(ls "$HOME/.hermes/config.yaml.bak-watchdog-"* 2>/dev/null | wc -l | tr -d ' ')
+if [ "$STOMPED" != "0" ]; then
+  warn "Found $STOMPED config.yaml.bak-watchdog-* file(s) in ~/.hermes/"
+  warn "The OLD watchdog overwrote ~/.hermes/config.yaml at least once."
+  warn "Your current config may be stale — review: ls -la ~/.hermes/config.yaml*"
+fi
+# 4. If the main gateway LaunchAgent exists but the gateway isn't running
+#    (old watchdog likely killed it), start it once
+MAIN_GW_PLIST="$HOME/Library/LaunchAgents/ai.hermes.gateway.plist"
+if [ -f "$MAIN_GW_PLIST" ]; then
+  if ! pgrep -fl "hermes_cli.main gateway" 2>/dev/null | grep -v '\.ad-fleet' | grep -q "hermes_cli.main gateway"; then
+    log "Main Hermes gateway is down (likely killed by old watchdog) — starting it..."
+    launchctl load "$MAIN_GW_PLIST" 2>/dev/null || true
+    sleep 10
+    if pgrep -fl "hermes_cli.main gateway" 2>/dev/null | grep -v '\.ad-fleet' | grep -q "hermes_cli.main gateway"; then
+      ok "Main Hermes gateway restarted"
+    else
+      warn "Main Hermes gateway did not start — check manually: launchctl load $MAIN_GW_PLIST"
+    fi
+  fi
+fi
+ok "Old-watchdog remediation complete"
+
 # Install watchdog crons (if Hermes is available)
 FLEET_HERMES_BIN="$FLEET_DIR/hermes/hermes-agent/venv/bin/hermes"
 if [ -x "$FLEET_HERMES_BIN" ]; then
