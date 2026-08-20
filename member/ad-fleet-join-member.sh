@@ -81,6 +81,91 @@ if [ "$PHASE" -gt 0 ] && [ -f "$FLEET_DIR/config.yaml" ]; then
     fi
   done
 fi
+
+# Clean stale hermesbus memory from user's Hermes MEMORY.md
+if [ -f "$HOME/.hermes/memories/MEMORY.md" ]; then
+  log "Cleaning stale hermesbus memory from user Hermes..."
+  python3 << 'PYCLEAN' 2>/dev/null || true
+import os
+mem_path = os.path.expanduser("~/.hermes/memories/MEMORY.md")
+with open(mem_path, 'r') as f:
+    content = f.read()
+sep = "\n\xa7\n" if "\xa7" in content else "\n\xc2\xa7\n" if "\xc2\xa7" in content else "\n\x00\xa7\n"
+sections = content.split(sep) if sep in content else [content]
+stale_kw = ['hermesbus','hermes-bus','hermes.bus','fleet-heartbeat.sh','com.hermesbus',
+            'hermesbus.sh','hermesbus-poll','FLEET_DB_USER=fleet_member',
+            'Cred tiers (2026-08-17)','Heartbeat: MEMBERS use fleet-heartbeat',
+            'File transfer (2026-08-17)','hermes-bus+rsync',
+            'Fleet discovery: Check skills_list FIRST',
+            'Fleet roles: laptop-m1=primary']
+clean = [s for s in sections if not any(k.lower() in s.lower() for k in stale_kw)]
+content = sep.join(clean)
+with open(mem_path, 'w') as f:
+    f.write(content)
+PYCLEAN
+  ok "Memory cleaned"
+fi
+
+# Install ad-fleet-manager skill to user's Hermes (all machines get this)
+if [ -d "$HOME/.hermes/skills" ] && [ -f "$SCRIPT_DIR/scripts/ad-fleet-manager-skill.md" ]; then
+  log "Installing ad-fleet-manager skill to user Hermes..."
+  mkdir -p "$HOME/.hermes/skills/ad-fleet-manager"
+  cp "$SCRIPT_DIR/scripts/ad-fleet-manager-skill.md" "$HOME/.hermes/skills/ad-fleet-manager/SKILL.md"
+  ok "ad-fleet-manager skill installed"
+elif [ -d "$HOME/.hermes/skills" ]; then
+  log "Installing ad-fleet-manager skill from repo..."
+  if [ ! -d "$FLEET_DIR/repo" ]; then
+    git clone --depth 1 https://github.com/AcceleratingDigital/ad-fleet.git "$FLEET_DIR/repo" 2>/dev/null || true
+  fi
+  if [ -d "$FLEET_DIR/repo/skills/ad-fleet-manager" ]; then
+    mkdir -p "$HOME/.hermes/skills/ad-fleet-manager"
+    cp "$FLEET_DIR/repo/skills/ad-fleet-manager/SKILL.md" "$HOME/.hermes/skills/ad-fleet-manager/SKILL.md"
+    ok "ad-fleet-manager skill installed from repo"
+  fi
+fi
+
+# Install watchdog scripts and crons
+log "Installing watchdog scripts..."
+mkdir -p "$FLEET_DIR/scripts" "$HOME/.ad-fleet/hermes/scripts" "$HOME/.hermes/scripts"
+for ws in ad-fleet-watch-main-hermes.sh ad-fleet-watch-fleet-hermes.sh; do
+  if [ -f "$SCRIPT_DIR/scripts/$ws" ]; then
+    cp "$SCRIPT_DIR/scripts/$ws" "$FLEET_DIR/scripts/"
+    cp "$SCRIPT_DIR/scripts/$ws" "$HOME/.ad-fleet/hermes/scripts/" 2>/dev/null || true
+    cp "$SCRIPT_DIR/scripts/$ws" "$HOME/.hermes/scripts/" 2>/dev/null || true
+    chmod +x "$FLEET_DIR/scripts/$ws" "$HOME/.ad-fleet/hermes/scripts/$ws" "$HOME/.hermes/scripts/$ws" 2>/dev/null || true
+  fi
+done
+ok "Watchdog scripts installed"
+
+# Install watchdog crons (if Hermes is available)
+FLEET_HERMES_BIN="$HOME/.ad-fleet/hermes/hermes-agent/venv/bin/hermes"
+if [ -x "$FLEET_HERMES_BIN" ]; then
+  # Cron A: fleet Hermes watches main Hermes
+  EXISTING_A=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Main Hermes" || true)
+  if [ "$EXISTING_A" = "0" ]; then
+    HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_HERMES_BIN" cron create "every 10m" \
+      --name "Watch Main Hermes" --script "ad-fleet-watch-main-hermes.sh" \
+      --no-agent --deliver local 2>/dev/null && ok "Cron A installed (fleet watches main)" || true
+  fi
+fi
+MAIN_HERMES_BIN=$(command -v hermes 2>/dev/null || echo "$HOME/.hermes/hermes-agent/venv/bin/hermes")
+if [ -x "$MAIN_HERMES_BIN" ]; then
+  EXISTING_B=$(HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron list 2>/dev/null | grep -c "Watch Fleet Hermes" || true)
+  if [ "$EXISTING_B" = "0" ]; then
+    HERMES_HOME="$HOME/.hermes" "$MAIN_HERMES_BIN" cron create "every 10m" \
+      --name "Watch Fleet Hermes" --script "ad-fleet-watch-fleet-hermes.sh" \
+      --no-agent --deliver local 2>/dev/null && ok "Cron B installed (main watches fleet)" || true
+  fi
+fi
+
+# Clone the git repo for future fleet_update pulls
+if [ ! -d "$FLEET_DIR/repo" ]; then
+  log "Cloning ad-fleet repo for future updates..."
+  git clone --depth 1 https://github.com/AcceleratingDigital/ad-fleet.git "$FLEET_DIR/repo" 2>/dev/null && ok "Repo cloned" || warn "Repo clone failed (non-fatal)"
+else
+  cd "$FLEET_DIR/repo" && git pull --ff-only 2>/dev/null && ok "Repo updated" || true
+fi
+
 echo ""
 
 # ─── Check psql (required for DB access) ─────────────────────────────────────
