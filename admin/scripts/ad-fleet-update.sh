@@ -51,8 +51,10 @@ fi
 chmod +x "$FLEET_DIR/scripts/"*.sh 2>/dev/null || true
 
 # --- Reload LaunchAgents so they pick up new scripts ---
+# NOTE: Don't reload the poller — it's what's running this script!
+# Reloading it would kill this process mid-execution.
 log "Reloading daemons..."
-for agent in com.ad-fleet.heartbeat com.ad-fleet.poller; do
+for agent in com.ad-fleet.heartbeat; do
   PLIST="$HOME/Library/LaunchAgents/${agent}.plist"
   if [ -f "$PLIST" ]; then
     launchctl unload "$PLIST" 2>/dev/null || true
@@ -60,6 +62,8 @@ for agent in com.ad-fleet.heartbeat com.ad-fleet.poller; do
     log "  Reloaded: $agent"
   fi
 done
+# Poller picks up new code on next cycle automatically (5 min)
+log "  Poller: skipped (will pick up new code on next cycle)"
 
 # --- Deploy skills to user's Hermes (admin only) ---
 if [ "$ROLE" = "admin" ] && [ -d "$REPO_DIR/skills" ]; then
