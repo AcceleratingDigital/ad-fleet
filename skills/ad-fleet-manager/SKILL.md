@@ -25,11 +25,38 @@ export PGPASSWORD="$PG_ADMIN_PASS"
 psql -h 10.1.128.8 -p 5432 -U admin -d hermes_fleet
 ```
 
-## Fleet Status
+## Fleet Status Report (deterministic)
+
+Sends `status_report` task to all machines. Each machine collects locally — no LLM, pure shell. Returns JSON with:
+- main Hermes version, model, provider, port 8000 status
+- fleet Hermes version, model, provider, port 8001 status
+- daemon status (heartbeat, poller, gateway LaunchAgents)
+
+**Send to one machine:**
+```sql
+INSERT INTO hermes_bus (from_host, to_host, kind, body, task_title, task_expires_at)
+VALUES ('mm4p', 'TARGET', 'msg',
+  '{\"task\":\"status_report\"}'::jsonb::text,
+  'Status Report', NOW() + INTERVAL '1 hour');
+```
+
+**Send to all machines** — one INSERT per host from `SELECT host FROM fleet_directives`.
+
+**Collect results** (after ~5-10 min for poller cycles):
+```sql
+SELECT to_host, status,
+       LEFT(result, 500) as response
+FROM hermes_bus WHERE task_title = 'Status Report'
+ORDER BY to_host;
+```
+
+Results are JSON strings — parse with `json.loads()` to build the status table.
+
+## Fleet Status (heartbeat only)
 
 ```sql
 SELECT fs.hostname, fd.role, fd.classification, fd.is_canary,
-       ROUND(EXTRACT(EPOCH FROM (NOW() - fs.last_seen))) as secs_ago,
+       ROUND(EXTRACT(EPOCH FROM (NOW() - fs.last_seen))/60) as mins_ago,
        fs.machine_uuid IS NOT NULL as has_uuid
 FROM fleet_status fs
 JOIN fleet_directives fd ON fs.hostname = fd.host
@@ -39,6 +66,11 @@ ORDER BY fs.last_seen DESC;
 ## Send Tasks
 
 Insert into `hermes_bus`. `from_host` = this machine's registered hostname. Always `kind='msg'`.
+
+**IMPORTANT**: JSON bodies must use `::jsonb::text` cast to preserve quotes:
+```sql
+VALUES ('mm4p', 'TARGET', 'msg', '{\"task\":\"ping\"}'::jsonb::text, 'Ping', NOW() + INTERVAL '1 hour');
+```
 
 **Ping:**
 ```sql
@@ -85,6 +117,7 @@ FROM hermes_bus WHERE task_title = 'YOUR_TITLE' ORDER BY to_host;
 | task | description |
 |---|---|
 | `ping` | Returns "pong — HOSTNAME alive at TIME" |
+| `status_report` | Deterministic JSON: versions, models, providers, ports, daemons |
 | `doctor` | Full diagnostics via ad-fleet-doctor.sh |
 | `hermes_prompt` | LLM prompt to fleet Hermes port 8001 |
 | `fleet_update` | Git pull, reload daemons, deploy skills (admin only) |
@@ -104,3 +137,5 @@ FROM hermes_bus WHERE task_title = 'YOUR_TITLE' ORDER BY to_host;
 - `laptop-m1` — admin, always-on
 - `algo-laptop` — admin, transient (system hostname USA-M4P-PP)
 - `sharedminiintel` — writer/canary, always-on
+- `shitalm5pro` — reader, transient
+- `jatins-macbook-air` — reader, transient

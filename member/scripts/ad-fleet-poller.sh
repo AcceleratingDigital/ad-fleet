@@ -88,6 +88,61 @@ case "$TASK_TYPE" in
     RESULT="pong — $HOSTNAME alive at $(date)"
     ;;
 
+  "status_report")
+    # Deterministic local status collection — no LLM, pure shell
+    MAIN_BIN=$(command -v hermes 2>/dev/null || echo "$HOME/.hermes/hermes-agent/venv/bin/hermes")
+    FLEET_BIN="$HOME/.ad-fleet/hermes/hermes-agent/venv/bin/hermes"
+
+    # Main Hermes version
+    MAIN_VER="not installed"
+    [ -x "$MAIN_BIN" ] && MAIN_VER=$("$MAIN_BIN" --version 2>/dev/null | head -1)
+
+    # Fleet Hermes version
+    FLEET_VER="not installed"
+    [ -x "$FLEET_BIN" ] && FLEET_VER=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_BIN" --version 2>/dev/null | head -1)
+
+    # Main Hermes model + provider from config.yaml
+    MAIN_MODEL="unknown"
+    MAIN_PROVIDER="unknown"
+    if [ -f "$HOME/.hermes/config.yaml" ]; then
+      MAIN_MODEL=$(grep -m1 "^model:" "$HOME/.hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      MAIN_PROVIDER=$(grep -m1 "^provider:" "$HOME/.hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    fi
+
+    # Fleet Hermes model + provider from config.yaml
+    FLEET_MODEL="unknown"
+    FLEET_PROVIDER="unknown"
+    if [ -f "$HOME/.ad-fleet/hermes/config.yaml" ]; then
+      FLEET_MODEL=$(grep -m1 "^model:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      FLEET_PROVIDER=$(grep -m1 "^provider:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+    fi
+
+    # Port checks
+    MAIN_PORT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8000/v1/models 2>/dev/null)
+    [ -z "$MAIN_PORT" ] && MAIN_PORT="000"
+    FLEET_PORT=$(curl -s -o /dev/null -w "%{http_code}" --max-time 3 http://127.0.0.1:8001/v1/models 2>/dev/null)
+    [ -z "$FLEET_PORT" ] && FLEET_PORT="000"
+
+    # LaunchAgent status
+    HB_STATUS="not loaded"
+    launchctl list com.ad-fleet.heartbeat >/dev/null 2>&1 && HB_STATUS="loaded"
+    POLLER_STATUS="not loaded"
+    launchctl list com.ad-fleet.poller >/dev/null 2>&1 && POLLER_STATUS="loaded"
+    GW_STATUS="not loaded"
+    launchctl list com.ad-fleet.hermes-gateway >/dev/null 2>&1 && GW_STATUS="loaded"
+
+    # Build JSON result
+    RESULT=$(python3 -c "
+import json
+print(json.dumps({
+    'hostname': '$HOSTNAME',
+    'main_hermes': {'version': '$MAIN_VER', 'model': '$MAIN_MODEL', 'provider': '$MAIN_PROVIDER', 'port_8000': '$MAIN_PORT'},
+    'fleet_hermes': {'version': '$FLEET_VER', 'model': '$FLEET_MODEL', 'provider': '$FLEET_PROVIDER', 'port_8001': '$FLEET_PORT'},
+    'daemons': {'heartbeat': '$HB_STATUS', 'poller': '$POLLER_STATUS', 'gateway': '$GW_STATUS'}
+}))
+" 2>/dev/null)
+    ;;
+
   "join_approved")
     # Admin approved our join request — update local config role
     APPROVED_ROLE=$(echo "$TASK_BODY" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('role','writer'))" 2>/dev/null)
