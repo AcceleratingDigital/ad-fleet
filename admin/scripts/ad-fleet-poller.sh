@@ -101,20 +101,24 @@ case "$TASK_TYPE" in
     FLEET_VER="not installed"
     [ -x "$FLEET_BIN" ] && FLEET_VER=$(HERMES_HOME="$HOME/.ad-fleet/hermes" "$FLEET_BIN" --version 2>/dev/null | head -1)
 
-    # Main Hermes model + provider from config.yaml
+    # Main Hermes model + provider from config.yaml (nested format: model:\n  default: X\n  provider: Y)
     MAIN_MODEL="unknown"
     MAIN_PROVIDER="unknown"
     if [ -f "$HOME/.hermes/config.yaml" ]; then
-      MAIN_MODEL=$(grep -m1 "^model:" "$HOME/.hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
-      MAIN_PROVIDER=$(grep -m1 "^provider:" "$HOME/.hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      MAIN_MODEL=$(grep -A1 "^model:" "$HOME/.hermes/config.yaml" 2>/dev/null | grep "default:" | awk '{print $2}' | tr -d '"' || true)
+      MAIN_PROVIDER=$(grep -A5 "^model:" "$HOME/.hermes/config.yaml" 2>/dev/null | grep "provider:" | head -1 | awk '{print $2}' | tr -d '"' || true)
+      [ -z "$MAIN_MODEL" ] && MAIN_MODEL="unknown"
+      [ -z "$MAIN_PROVIDER" ] && MAIN_PROVIDER="unknown"
     fi
 
     # Fleet Hermes model + provider from config.yaml
     FLEET_MODEL="unknown"
     FLEET_PROVIDER="unknown"
     if [ -f "$HOME/.ad-fleet/hermes/config.yaml" ]; then
-      FLEET_MODEL=$(grep -m1 "^model:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
-      FLEET_PROVIDER=$(grep -m1 "^provider:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | awk '{print $2}' | tr -d '"')
+      FLEET_MODEL=$(grep -A1 "^model:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | grep "default:" | awk '{print $2}' | tr -d '"' || true)
+      FLEET_PROVIDER=$(grep -A5 "^model:" "$HOME/.ad-fleet/hermes/config.yaml" 2>/dev/null | grep "provider:" | head -1 | awk '{print $2}' | tr -d '"' || true)
+      [ -z "$FLEET_MODEL" ] && FLEET_MODEL="unknown"
+      [ -z "$FLEET_PROVIDER" ] && FLEET_PROVIDER="unknown"
     fi
 
     # Port checks
