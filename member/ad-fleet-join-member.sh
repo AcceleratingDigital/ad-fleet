@@ -34,6 +34,30 @@ echo "╚═══════════════════════�
 echo ""
 
 PHASE=$(get_state)
+
+# ─── Mode detection: fresh install / resume partial / update+repair existing ──
+# One script, three modes. Existing COMPLETE installs go to update & repair mode:
+# refresh scripts, pin psql, reload daemons, verify heartbeat, report issues.
+if [ -f "$FLEET_DIR/config.yaml" ] && [ "$PHASE" -ge 10 ]; then
+  log "Existing fleet install detected — running UPDATE & REPAIR mode..."
+  echo ""
+  if [ -f "$SCRIPT_DIR/scripts/ad-fleet-repair.sh" ]; then
+    bash "$SCRIPT_DIR/scripts/ad-fleet-repair.sh"
+  else
+    warn "Repair script not bundled — refreshing scripts and reloading daemons only"
+    [ -d "$SCRIPT_DIR/scripts" ] && cp "$SCRIPT_DIR/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null && chmod +x "$FLEET_DIR/scripts/"*.sh
+    for agent in com.ad-fleet.heartbeat com.ad-fleet.poller; do
+      PLIST="$HOME/Library/LaunchAgents/${agent}.plist"
+      [ -f "$PLIST" ] && launchctl unload "$PLIST" 2>/dev/null; launchctl load "$PLIST" 2>/dev/null
+    done
+    bash "$FLEET_DIR/scripts/ad-fleet-heartbeat.sh" 2>/dev/null && ok "Heartbeat fired" || warn "Heartbeat failed — see $FLEET_DIR/logs/"
+    [ -x "$FLEET_DIR/scripts/ad-fleet-doctor.sh" ] && bash "$FLEET_DIR/scripts/ad-fleet-doctor.sh"
+  fi
+  echo ""
+  log "Update & repair complete. (Delete $FLEET_DIR/config.yaml only if you want a full reinstall.)"
+  exit 0
+fi
+
 [ "$PHASE" -gt 0 ] && log "Resuming from phase $PHASE..." || log "Starting fresh installation..."
 
 # ─── Phase 0: Cleanup old fleet and stale state ──────────────────────────────
