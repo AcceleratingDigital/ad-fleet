@@ -15,8 +15,18 @@ HOSTNAME=$(grep "hostname:" "$CONFIG" | awk '{print $2}' | tr -d '"')
 
 export PGPASSWORD="$DB_PASS"
 
+# --- Robust psql resolution (bare `psql` fails on libpq-only installs) ---
+PSQL=""
+for p in "$HOME/.ad-fleet/bin/psql" /opt/homebrew/bin/psql /usr/local/bin/psql /opt/homebrew/opt/libpq/bin/psql $(command -v psql 2>/dev/null); do
+  [ -x "$p" ] && PSQL="$p" && break
+done
+if [ -z "$PSQL" ]; then
+  echo "$(date): Poller FAILED - psql not found anywhere" >> "$LOG"
+  exit 1
+fi
+
 # Fetch one pending non-expired task for this machine
-TASK=$(psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+TASK=$("$PSQL" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
   "SELECT id, task_title, body FROM hermes_bus
    WHERE to_host = '$HOSTNAME'
      AND status = 'pending'
@@ -33,7 +43,7 @@ TASK_BODY=$(echo "$TASK" | cut -d'|' -f3-)
 echo "$(date): Received task $TASK_ID — $TASK_TITLE" >> "$LOG"
 
 # Mark claimed
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
+"$PSQL" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
   "UPDATE hermes_bus SET status='claimed', claimed_at=NOW() WHERE id=$TASK_ID;" 2>/dev/null
 
 # Parse task type from body
@@ -220,7 +230,7 @@ esac
 
 # Write result back
 SAFE_RESULT=$(echo "$RESULT" | sed "s/'/''/g" | head -c 4000)
-psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
+"$PSQL" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
   "UPDATE hermes_bus SET status='done', result='$SAFE_RESULT', done_at=NOW() WHERE id=$TASK_ID;" 2>/dev/null
 
 echo "$(date): Task $TASK_ID done — $TASK_TITLE" >> "$LOG"

@@ -176,6 +176,11 @@ for p in /opt/homebrew/bin/psql /usr/local/bin/psql $(command -v psql 2>/dev/nul
 done
 if [ -n "$PSQL_BIN" ]; then
   ok "psql found at $PSQL_BIN"
+  # Pin it into ~/.ad-fleet/bin so heartbeat/poller LaunchAgents never depend
+  # on PATH (this silently killed daemons on libpq-only installs)
+  mkdir -p "$FLEET_DIR/bin"
+  ln -sf "$PSQL_BIN" "$FLEET_DIR/bin/psql"
+  ok "psql pinned: $FLEET_DIR/bin/psql -> $PSQL_BIN"
 else
   warn "psql not found — installing via Homebrew..."
   if command -v brew &>/dev/null; then
@@ -437,6 +442,27 @@ if [ "$PHASE" -lt 9 ]; then
   bash "$FLEET_DIR/scripts/ad-fleet-heartbeat.sh" && ok "First heartbeat sent" || \
     warn "Heartbeat failed — daemon will retry in 5 min"
   save_state 9
+fi
+
+# ─── Phase 9.5: Verify the heartbeat actually landed in the fleet DB ─────────
+if [ "$PHASE" -lt 10 ]; then
+  log "Phase 9.5: Verifying heartbeat reached the fleet..."
+  DB_HOST=$(grep "db_host:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  DB_PORT=$(grep "db_port:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  DB_USER=$(grep "db_user:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  DB_PASS=$(grep "db_pass:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  DB_NAME=$(grep "db_name:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  HOSTNAME=$(grep "hostname:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
+  export PGPASSWORD="$DB_PASS"
+  PSQL_CMD="${PSQL_BIN:-psql}"
+  SEEN=$("$PSQL_CMD" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -tAc \
+    "SELECT ROUND(EXTRACT(EPOCH FROM (NOW() - last_seen))/60) FROM fleet_status WHERE hostname='$HOSTNAME';" 2>/dev/null | head -1)
+  if [ -n "$SEEN" ] && [ "$SEEN" -lt 5 ] 2>/dev/null; then
+    ok "Heartbeat VERIFIED in fleet DB (seen ${SEEN}m ago)"
+  else
+    warn "Heartbeat NOT visible in fleet DB yet — running auto-repair..."
+    [ -f "$FLEET_DIR/scripts/ad-fleet-repair.sh" ] && bash "$FLEET_DIR/scripts/ad-fleet-repair.sh" || true
+  fi
 fi
 
 # ─── Phase 10: Run doctor ────────────────────────────────────────────────────
