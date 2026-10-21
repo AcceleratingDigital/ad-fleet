@@ -371,10 +371,14 @@ if [ "$PHASE" -lt 7 ]; then
   DB_NAME=$(grep "db_name:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
 
   export PGPASSWORD="$DB_PASS"
-  if psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" &>/dev/null; then
+  PSQL_CMD="${PSQL_BIN:-psql}"
+  DB_ERR=$("$PSQL_CMD" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -c "SELECT 1;" 2>&1)
+  if [ $? -eq 0 ]; then
     ok "Database connection successful"
   else
-    warn "Database connection failed — check network. Heartbeat will retry automatically."
+    warn "Database connection failed — showing the real error:"
+    echo "$DB_ERR" | sed 's/^/      /'
+    warn "Heartbeat will retry automatically, but the join request (Phase 8) will also fail until this is fixed."
   fi
   save_state 7
 fi
@@ -395,8 +399,13 @@ if [ "$PHASE" -lt 8 ]; then
   TEAM=$(grep "team:" "$FLEET_DIR/config.yaml" | awk '{print $2}' | tr -d '"')
 
   export PGPASSWORD="$DB_PASS"
-  psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
-    "INSERT INTO hermes_bus (from_host, to_host, kind, body, task_title, task_expires_at)
+  # Use the located psql binary (Phase 1) — bare `psql` fails silently on machines
+  # where libpq's psql isn't linked into PATH, which killed join requests silently.
+  PSQL_CMD="${PSQL_BIN:-psql}"
+  if ! command -v "$PSQL_CMD" >/dev/null 2>&1 && [ "$PSQL_CMD" != "psql" ]; then
+    : # absolute path, fine
+  fi
+  JOIN_SQL="INSERT INTO hermes_bus (from_host, to_host, kind, body, task_title, task_expires_at)
      VALUES (
        '$HOSTNAME',
        'fleet-admin',
@@ -404,10 +413,23 @@ if [ "$PHASE" -lt 8 ]; then
        '{\"task\":\"join_request\",\"hostname\":\"$HOSTNAME\",\"uuid\":\"$MACHINE_UUID\",\"classification\":\"$CLASS\",\"team\":\"$TEAM\",\"user\":\"$USER_NAME\"}',
        'JOIN REQUEST: $HOSTNAME ($USER_NAME, $TEAM) wants to join the fleet',
        NOW() + INTERVAL '24 hours'
-     );" 2>/dev/null && ok "Join request sent to fleet admins" || warn "Could not send join request — check DB connection"
-
-  save_state 8
+     ) RETURNING id;"
+  JOIN_RESULT=$("$PSQL_CMD" -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -t -A -c "$JOIN_SQL" 2>&1)
+  JOIN_RC=$?
+  if [ $JOIN_RC -eq 0 ] && echo "$JOIN_RESULT" | head -1 | grep -qE '^[0-9]+$'; then
+    JOIN_TASK_ID=$(echo "$JOIN_RESULT" | head -1)
+    ok "Join request sent to fleet admins (task $JOIN_TASK_ID)"
+  else
+    warn "Join request FAILED — showing the real error instead of hiding it:"
+    echo "$JOIN_RESULT" | sed 's/^/      /'
+    warn "Ask a fleet admin to insert the join request manually, then rerun this installer (it resumes from Phase 8)."
+    # Keep going so heartbeat/doctor phases still run, but do NOT save state 8 —
+    # rerunning the installer will retry the join automatically.
+    save_state 7
+    SKIP_PHASE8_STATE=true
+  fi
 fi
+[ -z "${SKIP_PHASE8_STATE:-}" ] && [ "$PHASE" -lt 8 ] && save_state 8
 
 # ─── Phase 9: Fire first heartbeat ───────────────────────────────────────────
 if [ "$PHASE" -lt 9 ]; then
