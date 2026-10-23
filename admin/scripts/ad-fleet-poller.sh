@@ -225,3 +225,6 @@ psql -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" -d "$DB_NAME" -q -c \
 
 echo "$(date): Task $TASK_ID done — $TASK_TITLE" >> "$LOG"
 tail -500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+# Trim LaunchAgent stderr capture too
+POLLER_ERR_LOG="$HOME/.ad-fleet/logs/poller-error.log"
+[ -f "$POLLER_ERR_LOG" ] && tail -200 "$POLLER_ERR_LOG" > "$POLLER_ERR_LOG.tmp" && mv "$POLLER_ERR_LOG.tmp" "$POLLER_ERR_LOG"

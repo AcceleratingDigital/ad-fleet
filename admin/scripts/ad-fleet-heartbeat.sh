@@ -37,5 +37,7 @@ else
   echo "$(date): Heartbeat FAILED — $HOSTNAME" >> "$LOG"
 fi
 
-# Keep log to last 500 lines
+# Keep logs to last 500 lines (main log + LaunchAgent stderr capture)
 tail -500 "$LOG" > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+HB_ERR_LOG="$HOME/.ad-fleet/logs/heartbeat-error.log"
+[ -f "$HB_ERR_LOG" ] && tail -200 "$HB_ERR_LOG" > "$HB_ERR_LOG.tmp" && mv "$HB_ERR_LOG.tmp" "$HB_ERR_LOG"
