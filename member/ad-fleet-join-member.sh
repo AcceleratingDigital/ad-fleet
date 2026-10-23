@@ -487,6 +487,12 @@ if [ "$PHASE" -lt 10 ]; then
     warn "Heartbeat NOT visible in fleet DB yet — running auto-repair..."
     [ -f "$FLEET_DIR/scripts/ad-fleet-repair.sh" ] && bash "$FLEET_DIR/scripts/ad-fleet-repair.sh" || true
   fi
+  # Registration-time specs collection (NOT on heartbeat — specs rarely change)
+  if [ -x "$FLEET_DIR/scripts/ad-fleet-specs-update.sh" ]; then
+    log "Collecting machine specs for the fleet registry..."
+    bash "$FLEET_DIR/scripts/ad-fleet-specs-update.sh" && ok "Specs saved to fleet registry" || \
+      warn "Specs collection failed (non-fatal) — admin can request specs_update later"
+  fi
 fi
 
 # ─── Phase 10: Run doctor ────────────────────────────────────────────────────
