@@ -95,13 +95,25 @@ else
 fi
 
 # ─── Step 4: scripts current + executable ────────────────────────────────────
+# IMPORTANT: the package (bootstrap clone) is the source of truth — it's the
+# freshest code. A stale repo clone on disk must NEVER overwrite it.
 if [ -f "$SCRIPT_DIR/ad-fleet-heartbeat.sh" ] && [ -f "$SCRIPT_DIR/ad-fleet-poller.sh" ]; then
-  cp "$SCRIPT_DIR"/*.sh "$FLEET_DIR/scripts/" 2>/dev/null && chmod +x "$FLEET_DIR/scripts/"*.sh
-  ok "Scripts refreshed from package"
-fi
-# Also sync from repo clone if present and newer
-if [ -d "$FLEET_DIR/repo/member/scripts" ]; then
+  cp "$SCRIPT_DIR"/*.sh "$FLEET_DIR/scripts/" && chmod +x "$FLEET_DIR/scripts/"*.sh || {
+    ISSUES+=("script copy from package FAILED — installed daemons may be stale")
+    warn "Could not refresh scripts from package"
+  }
+  # Verify the installed heartbeat actually has the v5 psql resolution
+  if grep -q 'ad-fleet/bin/psql' "$FLEET_DIR/scripts/ad-fleet-heartbeat.sh" 2>/dev/null; then
+    ok "Scripts refreshed from package (v5 verified)"
+  else
+    ISSUES+=("installed heartbeat script is STALE (no v5 psql resolution) — copy failed silently")
+    warn "Installed heartbeat is OLD — daemons will keep failing"
+  fi
+elif [ -d "$FLEET_DIR/repo/member/scripts" ]; then
+  # No package scripts beside us — fall back to repo clone, but pull first
+  (cd "$FLEET_DIR/repo" && git pull --ff-only >/dev/null 2>&1)
   cp "$FLEET_DIR/repo/member/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null && chmod +x "$FLEET_DIR/scripts/"*.sh
+  ok "Scripts refreshed from repo clone"
 fi
 
 # ─── Step 5: LaunchAgents — reinstall + load ─────────────────────────────────
@@ -136,7 +148,12 @@ done
 sleep 2
 if [ -x "$FLEET_DIR/scripts/ad-fleet-heartbeat.sh" ]; then
   HB_OUT=$(bash "$FLEET_DIR/scripts/ad-fleet-heartbeat.sh" 2>&1)
-  ok "Heartbeat fired"
+  if echo "$HB_OUT" | grep -q "FAILED"; then
+    ISSUES+=("manual heartbeat run FAILED: $(echo "$HB_OUT" | head -2 | tr '\n' ' ' | head -c 300)")
+    warn "Heartbeat fired but FAILED: $HB_OUT"
+  else
+    ok "Heartbeat fired"
+  fi
 fi
 
 # ─── Step 6: verify heartbeat actually landed in the DB ──────────────────────
