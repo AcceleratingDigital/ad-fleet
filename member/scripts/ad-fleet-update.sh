@@ -24,10 +24,10 @@ log()  { echo "[$(date '+%H:%M:%S')] $*"; }
 if [ -d "$REPO_DIR/.git" ]; then
   log "Pulling latest from GitHub..."
   cd "$REPO_DIR"
-  git pull origin main 2>&1 | tail -5
+  GIT_TERMINAL_PROMPT=0 git -c core.askPass=true pull origin main 2>&1 | tail -5
 else
   log "Cloning ad-fleet repo..."
-  git clone --depth 1 "$REPO_URL" "$REPO_DIR" 2>&1 | tail -5
+  GIT_TERMINAL_PROMPT=0 git -c core.askPass=true clone --depth 1 "$REPO_URL" "$REPO_DIR" 2>&1 | tail -5
   cd "$REPO_DIR"
 fi
 
