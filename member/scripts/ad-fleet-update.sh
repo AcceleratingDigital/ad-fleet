@@ -41,11 +41,13 @@ cp "$REPO_DIR/shared/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null || true
 chmod +x "$FLEET_DIR/scripts/"*.sh 2>/dev/null || true
 
 # --- Copy role-specific scripts ---
+# Empty/unknown role falls back to member scripts — a blank role must not skip script updates.
 if [ "$ROLE" = "admin" ]; then
   log "Updating admin scripts..."
   cp "$REPO_DIR/admin/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null || true
-elif [ "$ROLE" = "member" ] || [ "$ROLE" = "writer" ] || [ "$ROLE" = "reader" ]; then
-  log "Updating member scripts..."
+  cp "$REPO_DIR/member/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null || true
+else
+  log "Updating member scripts (role: ${ROLE:-unset})..."
   cp "$REPO_DIR/member/scripts/"*.sh "$FLEET_DIR/scripts/" 2>/dev/null || true
 fi
 chmod +x "$FLEET_DIR/scripts/"*.sh 2>/dev/null || true
