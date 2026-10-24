@@ -147,6 +147,16 @@ print(json.dumps({
 " 2>/dev/null)
     ;;
 
+  "specs_update")
+    # Admin asked for fresh machine specs — collect and upsert into fleet_specs
+    if [ -x "$HOME/.ad-fleet/scripts/ad-fleet-specs-update.sh" ]; then
+      RESULT=$(bash "$HOME/.ad-fleet/scripts/ad-fleet-specs-update.sh" 2>&1 && echo "OK" || echo "FAILED")
+      RESULT="specs_update: $RESULT (see ~/.ad-fleet/logs/specs.log)"
+    else
+      RESULT="specs_update: ad-fleet-specs-update.sh not installed — rerun the installer"
+    fi
+    ;;
+
   "join_approved")
     # Admin approved our join request — update local config role
     APPROVED_ROLE=$(echo "$TASK_BODY" | python3 -c "import sys,json; d=json.loads(sys.stdin.read()); print(d.get('role','writer'))" 2>/dev/null)
